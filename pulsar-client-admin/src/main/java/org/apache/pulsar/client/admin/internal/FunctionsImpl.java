@@ -54,6 +54,7 @@ import org.apache.pulsar.common.policies.data.FunctionInstanceStatsDataImpl;
 import org.apache.pulsar.common.policies.data.FunctionStats;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.asynchttpclient.AsyncCompletionHandlerBase;
 import org.asynchttpclient.HttpResponseBodyPart;
 import org.asynchttpclient.RequestBuilder;
@@ -87,6 +88,19 @@ public class FunctionsImpl extends ComponentResource implements Functions {
     public CompletableFuture<List<String>> getFunctionsAsync(String tenant, String namespace) {
         WebTarget path = functions.path(tenant).path(namespace);
         return asyncGetRequest(path, new GenericType<List<String>>() {});
+    }
+
+    @Override
+    public List<FunctionStatusSummary> getFunctionsWithStatus(String tenant, String namespace)
+            throws PulsarAdminException {
+        return sync(() -> getFunctionsWithStatusAsync(tenant, namespace));
+    }
+
+    @Override
+    public CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(
+            String tenant, String namespace) {
+        WebTarget path = functions.path(tenant).path(namespace).path("status").path("summary");
+        return asyncGetRequest(path, new GenericType<List<FunctionStatusSummary>>() {});
     }
 
     @Override

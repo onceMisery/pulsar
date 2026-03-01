@@ -45,6 +45,7 @@ import org.apache.pulsar.common.io.ConnectorDefinition;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsDataImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.worker.WorkerService;
 import org.apache.pulsar.functions.worker.rest.FunctionApiResource;
 import org.apache.pulsar.functions.worker.service.api.Functions;
@@ -116,6 +117,24 @@ public class FunctionsApiV3Resource extends FunctionApiResource {
     public List<String> listFunctions(final @PathParam("tenant") String tenant,
                                     final @PathParam("namespace") String namespace) {
         return functions().listFunctions(tenant, namespace, authParams());
+    }
+
+    @GET
+    @ApiOperation(
+            value = "Displays a batch status summary for all Pulsar Functions in a namespace",
+            response = FunctionStatusSummary.class,
+            responseContainer = "List"
+    )
+    @ApiResponses(value = {
+            @ApiResponse(code = 400, message = "Invalid request"),
+            @ApiResponse(code = 403, message = "The requester doesn't have admin permissions")
+    })
+    @Produces(MediaType.APPLICATION_JSON)
+    @Path("/{tenant}/{namespace}/status/summary")
+    public List<FunctionStatusSummary> listFunctionsWithStatus(
+            final @PathParam("tenant") String tenant,
+            final @PathParam("namespace") String namespace) {
+        return functions().listFunctionsWithStatus(tenant, namespace, authParams());
     }
 
     @GET

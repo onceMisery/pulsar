@@ -32,6 +32,7 @@ import org.apache.pulsar.common.io.ConnectorDefinition;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsData;
 import org.apache.pulsar.common.policies.data.FunctionStats;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 
 /**
  * Admin interface for function management.
@@ -68,6 +69,45 @@ public interface Functions {
      *
      */
     CompletableFuture<List<String>> getFunctionsAsync(String tenant, String namespace);
+
+    /**
+     * Get a batch status summary for all functions in a namespace.
+     * <p/>
+     * Returns a lightweight summary (name, state, instance counts) for every function
+     * under the given tenant/namespace in a single API call. This is not equivalent to
+     * calling {@link #getFunctionStatus} for each function — it returns only aggregated
+     * counts, not per-instance details.
+     * <p/>
+     * Individual function failures are isolated: a function whose status cannot be
+     * retrieved will appear with {@code state = UNKNOWN} and a non-null {@code error}.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     *
+     * @return list of status summaries, one per function
+     *
+     * @throws NotAuthorizedException
+     *             Don't have admin permission
+     * @throws PulsarAdminException
+     *             Unexpected error
+     */
+    List<FunctionStatusSummary> getFunctionsWithStatus(String tenant, String namespace) throws PulsarAdminException;
+
+    /**
+     * Get a batch status summary for all functions in a namespace asynchronously.
+     * <p/>
+     * Async version of {@link #getFunctionsWithStatus(String, String)}.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     *
+     * @return a future that completes with the list of status summaries
+     */
+    CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(String tenant, String namespace);
 
     /**
      * Get the configuration for the specified function.

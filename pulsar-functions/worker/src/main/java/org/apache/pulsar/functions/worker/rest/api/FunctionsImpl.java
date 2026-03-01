@@ -47,6 +47,7 @@ import org.apache.pulsar.common.functions.Utils;
 import org.apache.pulsar.common.functions.WorkerInfo;
 import org.apache.pulsar.common.policies.data.ExceptionInformation;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.RestException;
 import org.apache.pulsar.functions.auth.FunctionAuthData;
 import org.apache.pulsar.functions.instance.InstanceUtils;
@@ -787,5 +788,77 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
                 }
             }
         }
+    }
+
+    @Override
+    public List<FunctionStatusSummary> listFunctionsWithStatus(
+            final String tenant,
+            final String namespace,
+            final AuthenticationParameters authParams) {
+
+        if (!isWorkerServiceAvailable()) {
+            throwUnavailableException();
+        }
+
+        // listFunctions already handles auth check and parameter validation
+        List<String> functionNames = listFunctions(tenant, namespace, authParams);
+        List<FunctionStatusSummary> summaries = new java.util.ArrayList<>(functionNames.size());
+
+        for (String name : functionNames) {
+            summaries.add(buildSummary(tenant, namespace, name, authParams));
+        }
+
+        summaries.sort(java.util.Comparator.comparing(FunctionStatusSummary::getName));
+        return summaries;
+    }
+
+    private FunctionStatusSummary buildSummary(String tenant, String namespace,
+                                               String name, AuthenticationParameters authParams) {
+        try {
+            FunctionStatus status = getFunctionStatusForSummary(tenant, namespace, name, authParams);
+            return FunctionStatusSummary.builder()
+                    .name(name)
+                    .state(deriveState(status.getNumInstances(), status.getNumRunning()))
+                    .numInstances(status.getNumInstances())
+                    .numRunning(status.getNumRunning())
+                    .build();
+        } catch (Exception e) {
+            log.warn("{}/{}/{} Failed to get status for summary", tenant, namespace, name, e);
+            return FunctionStatusSummary.builder()
+                    .name(name)
+                    .state(FunctionStatusSummary.SummaryState.UNKNOWN)
+                    .error(e.getMessage())
+                    .build();
+        }
+    }
+
+    private FunctionStatus getFunctionStatusForSummary(String tenant, String namespace, String name,
+                                                       AuthenticationParameters authParams)
+            throws PulsarAdminException {
+        try {
+            // Fast path: local worker service path.
+            return getFunctionStatus(tenant, namespace, name, null, authParams);
+        } catch (Exception localError) {
+            // Fallback: query through internal admin client to avoid local redirect/null-uri edge cases.
+            try {
+                return worker().getFunctionAdmin().functions().getFunctionStatus(tenant, namespace, name);
+            } catch (PulsarAdminException remoteError) {
+                remoteError.addSuppressed(localError);
+                throw remoteError;
+            }
+        }
+    }
+
+    private static FunctionStatusSummary.SummaryState deriveState(int numInstances, int numRunning) {
+        if (numInstances <= 0) {
+            return FunctionStatusSummary.SummaryState.UNKNOWN;
+        }
+        if (numRunning == numInstances) {
+            return FunctionStatusSummary.SummaryState.RUNNING;
+        }
+        if (numRunning == 0) {
+            return FunctionStatusSummary.SummaryState.STOPPED;
+        }
+        return FunctionStatusSummary.SummaryState.PARTIAL;
     }
 }

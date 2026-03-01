@@ -31,6 +31,7 @@ import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import lombok.Cleanup;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.admin.cli.CmdFunctions.CreateFunction;
@@ -46,6 +47,7 @@ import org.apache.pulsar.client.admin.Functions;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.api.Context;
 import org.apache.pulsar.functions.api.Function;
 import org.apache.pulsar.functions.api.utils.IdentityFunction;
@@ -913,5 +915,57 @@ public class CmdFunctionsTest {
         });
         verify(functions, times(1))
                 .downloadFunction(JAR_NAME, TENANT, NAMESPACE, FN_NAME, true);
+    }
+
+    @Test
+    public void testListFunctionsLongFormat() throws Exception {
+        List<FunctionStatusSummary> summaries = List.of(
+                FunctionStatusSummary.builder()
+                        .name("fn-a")
+                        .state(FunctionStatusSummary.SummaryState.RUNNING)
+                        .numInstances(2).numRunning(2).build()
+        );
+        when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE)))
+                .thenReturn(summaries);
+
+        cmd.run(new String[] {
+                "list",
+                "--tenant", TENANT,
+                "--namespace", NAMESPACE,
+                "-l"
+        });
+
+        verify(functions, times(1))
+                .getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE));
+        verify(functions, times(0))
+                .getFunctions(eq(TENANT), eq(NAMESPACE));
+    }
+
+    @Test
+    public void testListFunctionsWithStateFilter() throws Exception {
+        List<FunctionStatusSummary> summaries = List.of(
+                FunctionStatusSummary.builder()
+                        .name("fn-running")
+                        .state(FunctionStatusSummary.SummaryState.RUNNING)
+                        .numInstances(1).numRunning(1).build(),
+                FunctionStatusSummary.builder()
+                        .name("fn-stopped")
+                        .state(FunctionStatusSummary.SummaryState.STOPPED)
+                        .numInstances(1).numRunning(0).build()
+        );
+        when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE)))
+                .thenReturn(summaries);
+
+        cmd.run(new String[] {
+                "list",
+                "--tenant", TENANT,
+                "--namespace", NAMESPACE,
+                "--state", "RUNNING"
+        });
+
+        verify(functions, times(1))
+                .getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE));
+        verify(functions, times(0))
+                .getFunctions(eq(TENANT), eq(NAMESPACE));
     }
 }

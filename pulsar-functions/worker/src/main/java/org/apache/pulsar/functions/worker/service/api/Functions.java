@@ -28,6 +28,7 @@ import org.apache.pulsar.common.functions.FunctionDefinition;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
 import org.apache.pulsar.common.policies.data.FunctionStatus.FunctionInstanceStatus.FunctionInstanceStatusData;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.worker.WorkerService;
 import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
 
@@ -102,4 +103,7 @@ public interface Functions<W extends WorkerService> extends Component<W> {
     void reloadBuiltinFunctions(AuthenticationParameters authParams) throws IOException;
 
     List<FunctionDefinition> getBuiltinFunctions(AuthenticationParameters authParams);
+
+    List<FunctionStatusSummary> listFunctionsWithStatus(String tenant, String namespace,
+                                                        AuthenticationParameters authParams);
 }

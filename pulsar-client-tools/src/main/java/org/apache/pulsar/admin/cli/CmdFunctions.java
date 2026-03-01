@@ -49,6 +49,7 @@ import org.apache.pulsar.common.functions.ConsumerConfig;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.FunctionState;
 import org.apache.pulsar.common.functions.ProducerConfig;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.functions.Resources;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.functions.Utils;
@@ -1050,9 +1051,52 @@ public class CmdFunctions extends CmdBase {
 
     @Command(description = "List all Pulsar Functions running under a specific tenant and namespace")
     class ListFunctions extends NamespaceCommand {
+
+        @Option(names = "--state",
+                description = "Filter by runtime state: RUNNING, STOPPED, PARTIAL, UNKNOWN")
+        private FunctionStatusSummary.SummaryState state;
+
+        @Option(names = {"-l", "--long"},
+                description = "Show extended output with state and instance counts")
+        private boolean longFormat;
+
         @Override
         void runCmd() throws Exception {
-            print(getAdmin().functions().getFunctions(tenant, namespace));
+            if (state == null && !longFormat) {
+                print(getAdmin().functions().getFunctions(tenant, namespace));
+                return;
+            }
+
+            List<FunctionStatusSummary> summaries =
+                    getAdmin().functions().getFunctionsWithStatus(tenant, namespace);
+
+            if (state != null) {
+                summaries = summaries.stream()
+                        .filter(s -> s.getState() == state)
+                        .collect(java.util.stream.Collectors.toList());
+            }
+
+            if (longFormat) {
+                printLongFormat(summaries);
+            } else {
+                for (FunctionStatusSummary s : summaries) {
+                    print(s.getName());
+                }
+            }
+        }
+
+        private void printLongFormat(List<FunctionStatusSummary> summaries) {
+            String header = String.format("%-40s %-10s %s", "NAME", "STATE", "RUNNING/INSTANCES");
+            print(header);
+            for (FunctionStatusSummary s : summaries) {
+                String running = s.getState() == FunctionStatusSummary.SummaryState.UNKNOWN
+                        ? "?" : String.valueOf(s.getNumRunning());
+                String instances = s.getState() == FunctionStatusSummary.SummaryState.UNKNOWN
+                        ? "?" : String.valueOf(s.getNumInstances());
+                String line = String.format("%-40s %-10s %s/%s",
+                        s.getName(), s.getState(), running, instances);
+                print(line);
+            }
         }
     }
 
