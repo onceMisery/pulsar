@@ -60,6 +60,7 @@ import org.apache.pulsar.common.policies.data.FunctionInstanceStatsDataImpl;
 import org.apache.pulsar.common.policies.data.FunctionStats;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.FutureUtil;
 import org.asynchttpclient.AsyncCompletionHandlerBase;
@@ -98,36 +99,36 @@ public class FunctionsImpl extends ComponentResource implements Functions {
     }
 
     @Override
-    public List<FunctionStatusSummary> getFunctionsWithStatus(String tenant, String namespace)
+    public FunctionStatusPage getFunctionsWithStatus(String tenant, String namespace)
             throws PulsarAdminException {
         return sync(() -> getFunctionsWithStatusAsync(tenant, namespace, null, null));
     }
 
     @Override
-    public CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(
+    public CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(
             String tenant, String namespace) {
         return getFunctionsWithStatusAsync(tenant, namespace, null, null);
     }
 
     @Override
-    public List<FunctionStatusSummary> getFunctionsWithStatus(
-            String tenant, String namespace, Integer limit, String continuationToken)
+    public FunctionStatusPage getFunctionsWithStatus(
+            String tenant, String namespace, Integer limit, String startAfter)
             throws PulsarAdminException {
-        return sync(() -> getFunctionsWithStatusAsync(tenant, namespace, limit, continuationToken));
+        return sync(() -> getFunctionsWithStatusAsync(tenant, namespace, limit, startAfter));
     }
 
     @Override
-    public CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(
-            String tenant, String namespace, Integer limit, String continuationToken) {
+    public CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(
+            String tenant, String namespace, Integer limit, String startAfter) {
         WebTarget path = functions.path(tenant).path(namespace).path("status").path("summary");
         if (limit != null) {
             path = path.queryParam("limit", limit);
         }
-        if (continuationToken != null && !continuationToken.isEmpty()) {
-            path = path.queryParam("continuationToken", continuationToken);
+        if (startAfter != null && !startAfter.isEmpty()) {
+            path = path.queryParam("startAfter", startAfter);
         }
-        CompletableFuture<List<FunctionStatusSummary>> result = new CompletableFuture<>();
-        asyncGetRequest(path, new GenericType<List<FunctionStatusSummary>>() {})
+        CompletableFuture<FunctionStatusPage> result = new CompletableFuture<>();
+        asyncGetRequest(path, new GenericType<FunctionStatusPage>() {})
                 .whenComplete((summaries, error) -> {
                     if (error == null) {
                         result.complete(summaries);
@@ -139,7 +140,7 @@ public class FunctionsImpl extends ComponentResource implements Functions {
                         log.debug(
                                 "Falling back to legacy functions status queries for {}/{}",
                                 tenant, namespace, cause);
-                        getFunctionsWithStatusLegacyAsync(tenant, namespace, limit, continuationToken)
+                        getFunctionsWithStatusLegacyAsync(tenant, namespace, limit, startAfter)
                                 .whenComplete((fallbackSummaries, fallbackError) -> {
                                     if (fallbackError == null) {
                                         result.complete(fallbackSummaries);
@@ -156,19 +157,37 @@ public class FunctionsImpl extends ComponentResource implements Functions {
         return result;
     }
 
-    private CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusLegacyAsync(
-            String tenant, String namespace, Integer limit, String continuationToken) {
+    private CompletableFuture<FunctionStatusPage> getFunctionsWithStatusLegacyAsync(
+            String tenant, String namespace, Integer limit, String startAfter) {
         return getFunctionsAsync(tenant, namespace).thenCompose(functionNames -> {
-            List<String> pagedNames = pageFunctionNames(functionNames, limit, continuationToken);
+            List<String> sorted = new ArrayList<>(functionNames);
+            sorted.sort(String::compareTo);
+            List<String> pagedNames = pageFunctionNames(functionNames, limit, startAfter);
             List<CompletableFuture<FunctionStatusSummary>> summaryFutures = pagedNames.stream()
                     .map(functionName -> getFunctionStatusAsync(tenant, namespace, functionName)
                             .handle((status, error) -> buildStatusSummary(functionName, status, error)))
                     .collect(Collectors.toList());
             return FutureUtil.waitForAll(new ArrayList<>(summaryFutures))
-                    .thenApply(__ -> summaryFutures.stream()
-                            .map(CompletableFuture::join)
-                            .sorted(Comparator.comparing(FunctionStatusSummary::getName))
-                            .collect(Collectors.toList()));
+                    .thenApply(__ -> {
+                        List<FunctionStatusSummary> summaries = summaryFutures.stream()
+                                .map(CompletableFuture::join)
+                                .sorted(Comparator.comparing(FunctionStatusSummary::getName))
+                                .collect(Collectors.toList());
+
+                        String nextStartAfter = null;
+                        if (limit != null && !pagedNames.isEmpty()) {
+                            String lastReturned = pagedNames.get(pagedNames.size() - 1);
+                            int lastIndex = sorted.indexOf(lastReturned);
+                            if (lastIndex >= 0 && lastIndex < sorted.size() - 1) {
+                                nextStartAfter = lastReturned;
+                            }
+                        }
+
+                        return FunctionStatusPage.builder()
+                                .summaries(summaries)
+                                .nextStartAfter(nextStartAfter)
+                                .build();
+                    });
         });
     }
 
@@ -193,7 +212,7 @@ public class FunctionsImpl extends ComponentResource implements Functions {
                 .build();
     }
 
-    private static List<String> pageFunctionNames(List<String> functionNames, Integer limit, String continuationToken) {
+    private static List<String> pageFunctionNames(List<String> functionNames, Integer limit, String startAfter) {
         if (limit != null && limit <= 0) {
             throw new IllegalArgumentException("limit must be greater than 0");
         }
@@ -201,8 +220,8 @@ public class FunctionsImpl extends ComponentResource implements Functions {
         List<String> sorted = new ArrayList<>(functionNames);
         sorted.sort(String::compareTo);
         int startIndex = 0;
-        if (continuationToken != null && !continuationToken.isEmpty()) {
-            while (startIndex < sorted.size() && sorted.get(startIndex).compareTo(continuationToken) <= 0) {
+        if (startAfter != null && !startAfter.isEmpty()) {
+            while (startIndex < sorted.size() && sorted.get(startIndex).compareTo(startAfter) <= 0) {
                 startIndex++;
             }
         }

@@ -34,6 +34,7 @@ import org.apache.pulsar.common.io.ConnectorDefinition;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsData;
 import org.apache.pulsar.common.policies.data.FunctionStats;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 
 /**
@@ -95,7 +96,7 @@ public interface Functions {
      * @throws PulsarAdminException
      *             Unexpected error
      */
-    default List<FunctionStatusSummary> getFunctionsWithStatus(String tenant, String namespace)
+    default FunctionStatusPage getFunctionsWithStatus(String tenant, String namespace)
             throws PulsarAdminException {
         return getFunctionsWithStatus(tenant, namespace, null, null);
     }
@@ -112,8 +113,8 @@ public interface Functions {
      *
      * @return a future that completes with the list of status summaries
      */
-    default CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(String tenant,
-                                                                                       String namespace) {
+    default CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(String tenant,
+                                                                               String namespace) {
         return getFunctionsWithStatusAsync(tenant, namespace, null, null);
     }
 
@@ -135,8 +136,8 @@ public interface Functions {
      * @throws PulsarAdminException
      *             Unexpected error
      */
-    default List<FunctionStatusSummary> getFunctionsWithStatus(
-            String tenant, String namespace, Integer limit, String continuationToken)
+    default FunctionStatusPage getFunctionsWithStatus(
+            String tenant, String namespace, Integer limit, String startAfter)
             throws PulsarAdminException {
         if (limit != null && limit <= 0) {
             throw new IllegalArgumentException("limit must be greater than 0");
@@ -147,8 +148,8 @@ public interface Functions {
         pagedNames.sort(String::compareTo);
 
         int startIndex = 0;
-        if (continuationToken != null && !continuationToken.isEmpty()) {
-            while (startIndex < pagedNames.size() && pagedNames.get(startIndex).compareTo(continuationToken) <= 0) {
+        if (startAfter != null && !startAfter.isEmpty()) {
+            while (startIndex < pagedNames.size() && pagedNames.get(startIndex).compareTo(startAfter) <= 0) {
                 startIndex++;
             }
         }
@@ -181,7 +182,12 @@ public interface Functions {
             }
         }
         summaries.sort(Comparator.comparing(FunctionStatusSummary::getName));
-        return summaries;
+
+        String nextStartAfter = endIndex < pagedNames.size() ? pagedNames.get(endIndex - 1) : null;
+        return FunctionStatusPage.builder()
+                .summaries(summaries)
+                .nextStartAfter(nextStartAfter)
+                .build();
     }
 
     /**
@@ -193,17 +199,17 @@ public interface Functions {
      *            Namespace name
      * @param limit
      *            Maximum number of functions to return; must be greater than 0 when provided
-     * @param continuationToken
-     *            Exclusive continuation token from previous page; null means from beginning
-     * @return a future that completes with the list of status summaries for the requested page
+     * @param startAfter
+     *            Exclusive cursor (function name) from previous page; null means from beginning
+     * @return a future that completes with the paginated response
      */
-    default CompletableFuture<List<FunctionStatusSummary>> getFunctionsWithStatusAsync(
-            String tenant, String namespace, Integer limit, String continuationToken) {
+    default CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(
+            String tenant, String namespace, Integer limit, String startAfter) {
         try {
             return CompletableFuture.completedFuture(
-                    getFunctionsWithStatus(tenant, namespace, limit, continuationToken));
+                    getFunctionsWithStatus(tenant, namespace, limit, startAfter));
         } catch (Exception e) {
-            CompletableFuture<List<FunctionStatusSummary>> future = new CompletableFuture<>();
+            CompletableFuture<FunctionStatusPage> future = new CompletableFuture<>();
             future.completeExceptionally(e);
             return future;
         }

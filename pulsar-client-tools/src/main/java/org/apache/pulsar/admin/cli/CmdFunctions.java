@@ -54,6 +54,7 @@ import org.apache.pulsar.common.functions.Resources;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.functions.Utils;
 import org.apache.pulsar.common.functions.WindowConfig;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.ObjectMapperFactory;
 import picocli.CommandLine.Command;
@@ -1055,7 +1056,7 @@ public class CmdFunctions extends CmdBase {
 
         @Option(names = "--state",
                 description = "Filter by runtime state: RUNNING, STOPPED, PARTIAL, UNKNOWN; cannot be combined"
-                        + " with --limit or --continuation-token")
+                        + " with --limit or --start-after")
         private FunctionStatusSummary.SummaryState state;
 
         @Option(names = {"-l", "--long"},
@@ -1066,9 +1067,9 @@ public class CmdFunctions extends CmdBase {
                 description = "Limit the number of status summaries returned (only with status-summary path)")
         private Integer limit;
 
-        @Option(names = "--continuation-token",
-                description = "Exclusive continuation token (function name) for status-summary pagination")
-        private String continuationToken;
+        @Option(names = "--start-after",
+                description = "Exclusive cursor (function name) for status-summary pagination")
+        private String startAfter;
 
         @Override
         void runCmd() throws Exception {
@@ -1077,18 +1078,20 @@ public class CmdFunctions extends CmdBase {
             }
 
             // Prevent ambiguity in semantics
-            if (state != null && (limit != null || continuationToken != null)) {
-                throw new ParameterException("--state cannot be combined with --limit or --continuation-token");
+            if (state != null && (limit != null || startAfter != null)) {
+                throw new ParameterException("--state cannot be combined with --limit or --start-after");
             }
 
-            if (state == null && !longFormat && limit == null && continuationToken == null) {
+            if (state == null && !longFormat && limit == null && startAfter == null) {
                 print(getAdmin().functions().getFunctions(tenant, namespace));
                 return;
             }
 
-            List<FunctionStatusSummary> summaries = limit == null && continuationToken == null
+            FunctionStatusPage page = limit == null && startAfter == null
                     ? getAdmin().functions().getFunctionsWithStatus(tenant, namespace)
-                    : getAdmin().functions().getFunctionsWithStatus(tenant, namespace, limit, continuationToken);
+                    : getAdmin().functions().getFunctionsWithStatus(tenant, namespace, limit, startAfter);
+
+            List<FunctionStatusSummary> summaries = page.getSummaries();
 
             if (state != null) {
                 summaries = summaries.stream()
@@ -1102,6 +1105,10 @@ public class CmdFunctions extends CmdBase {
                 for (FunctionStatusSummary s : summaries) {
                     print(s.getName());
                 }
+            }
+
+            if (page.getNextStartAfter() != null) {
+                print("\nNext page: --start-after " + page.getNextStartAfter());
             }
         }
 

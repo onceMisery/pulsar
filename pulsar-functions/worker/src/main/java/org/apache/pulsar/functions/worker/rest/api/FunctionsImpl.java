@@ -59,6 +59,7 @@ import org.apache.pulsar.common.functions.Utils;
 import org.apache.pulsar.common.functions.WorkerInfo;
 import org.apache.pulsar.common.policies.data.ExceptionInformation;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.RestException;
 import org.apache.pulsar.functions.auth.FunctionAuthData;
@@ -811,11 +812,11 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
     }
 
     @Override
-    public List<FunctionStatusSummary> listFunctionsWithStatus(
+    public FunctionStatusPage listFunctionsWithStatus(
             final String tenant,
             final String namespace,
             final Integer limit,
-            final String continuationToken,
+            final String startAfter,
             final AuthenticationParameters authParams) {
         if (!isWorkerServiceAvailable()) {
             throwUnavailableException();
@@ -829,9 +830,14 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
         try {
             // listFunctions already handles auth check and parameter validation
             List<String> functionNames = listFunctions(tenant, namespace, authParams);
-            List<String> pagedNames = pageFunctionNames(functionNames, limit, continuationToken);
+            List<String> sorted = new ArrayList<>(functionNames);
+            sorted.sort(String::compareTo);
+            List<String> pagedNames = pageFunctionNames(functionNames, limit, startAfter);
             if (pagedNames.isEmpty()) {
-                return Collections.emptyList();
+                return FunctionStatusPage.builder()
+                        .summaries(Collections.emptyList())
+                        .nextStartAfter(null)
+                        .build();
             }
 
             int configuredParallelism = worker().getWorkerConfig() != null
@@ -844,7 +850,23 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
                         () -> buildSummary(tenant, namespace, name, authParams), summaryExecutor));
             }
 
-            return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+            List<FunctionStatusSummary> summaries = futures.stream()
+                    .map(CompletableFuture::join)
+                    .collect(Collectors.toList());
+
+            String nextStartAfter = null;
+            if (limit != null && !pagedNames.isEmpty()) {
+                String lastReturned = pagedNames.get(pagedNames.size() - 1);
+                int lastIndex = sorted.indexOf(lastReturned);
+                if (lastIndex >= 0 && lastIndex < sorted.size() - 1) {
+                    nextStartAfter = lastReturned;
+                }
+            }
+
+            return FunctionStatusPage.builder()
+                    .summaries(summaries)
+                    .nextStartAfter(nextStartAfter)
+                    .build();
         } finally {
             if (summaryExecutor != null) {
                 summaryExecutor.shutdown();
@@ -864,7 +886,7 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
         }
     }
 
-    private static List<String> pageFunctionNames(List<String> functionNames, Integer limit, String continuationToken) {
+    private static List<String> pageFunctionNames(List<String> functionNames, Integer limit, String startAfter) {
         if (functionNames.isEmpty()) {
             return functionNames;
         }
@@ -872,8 +894,8 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
         sorted.sort(String::compareTo);
 
         int startIndex = 0;
-        if (isNotBlank(continuationToken)) {
-            while (startIndex < sorted.size() && sorted.get(startIndex).compareTo(continuationToken) <= 0) {
+        if (isNotBlank(startAfter)) {
+            while (startIndex < sorted.size() && sorted.get(startIndex).compareTo(startAfter) <= 0) {
                 startIndex++;
             }
         }

@@ -45,6 +45,7 @@ import org.apache.pulsar.common.io.ConnectorDefinition;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsDataImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.worker.WorkerService;
 import org.apache.pulsar.functions.worker.rest.FunctionApiResource;
@@ -131,12 +132,12 @@ public class FunctionsApiV3Resource extends FunctionApiResource {
     })
     @Produces(MediaType.APPLICATION_JSON)
     @Path("/{tenant}/{namespace}/status/summary")
-    public List<FunctionStatusSummary> listFunctionsWithStatus(
+    public FunctionStatusPage listFunctionsWithStatus(
             final @PathParam("tenant") String tenant,
             final @PathParam("namespace") String namespace,
             final @QueryParam("limit") Integer limit,
-            final @QueryParam("continuationToken") String continuationToken) {
-        return functions().listFunctionsWithStatus(tenant, namespace, limit, continuationToken, authParams());
+            final @QueryParam("startAfter") String startAfter) {
+        return functions().listFunctionsWithStatus(tenant, namespace, limit, startAfter, authParams());
     }
 
     @GET
