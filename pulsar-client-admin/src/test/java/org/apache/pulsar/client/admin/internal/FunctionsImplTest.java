@@ -57,7 +57,10 @@ public class FunctionsImplTest {
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
         FunctionStatusPage expected = FunctionStatusPage.builder()
                 .summaries(Collections.singletonList(
-                        FunctionStatusSummary.builder().name("fn-1").state(FunctionStatusSummary.SummaryState.RUNNING).build()))
+                        FunctionStatusSummary.builder()
+                                .name("fn-1")
+                                .state(FunctionStatusSummary.SummaryState.RUNNING)
+                                .build()))
                 .build();
         CompletableFuture<FunctionStatusPage> response = CompletableFuture.completedFuture(expected);
         doReturn(response).when(functions).asyncGetRequest(eq(summaryTarget), any(GenericType.class));
@@ -90,7 +93,10 @@ public class FunctionsImplTest {
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
         FunctionStatusPage expected = FunctionStatusPage.builder()
                 .summaries(Collections.singletonList(
-                        FunctionStatusSummary.builder().name("fn-2").state(FunctionStatusSummary.SummaryState.STOPPED).build()))
+                        FunctionStatusSummary.builder()
+                                .name("fn-2")
+                                .state(FunctionStatusSummary.SummaryState.STOPPED)
+                                .build()))
                 .build();
         CompletableFuture<FunctionStatusPage> response = CompletableFuture.completedFuture(expected);
         doReturn(response).when(functions).asyncGetRequest(eq(summaryTarget), any(GenericType.class));

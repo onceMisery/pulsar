@@ -183,10 +183,10 @@ public interface Functions {
         }
         summaries.sort(Comparator.comparing(FunctionStatusSummary::getName));
 
-        String nextToken = endIndex < pagedNames.size() ? pagedNames.get(endIndex - 1) : null;
+        String nextStartAfter = endIndex < pagedNames.size() ? pagedNames.get(endIndex - 1) : null;
         return FunctionStatusPage.builder()
                 .summaries(summaries)
-                .nextStartAfter(nextToken)
+                .nextStartAfter(nextStartAfter)
                 .build();
     }
 
