@@ -43,6 +43,7 @@ import org.apache.pulsar.broker.authentication.AuthenticationParameters;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.RestException;
 import org.apache.pulsar.functions.proto.Function;
@@ -468,13 +469,13 @@ public class FunctionApiV3ResourceTest extends AbstractFunctionApiResourceTest {
         doReturn(statusB).when(resource)
                 .getFunctionStatus(eq(TENANT), eq(NAMESPACE), eq("fn-b"), any(), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(TENANT, NAMESPACE, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(TENANT, NAMESPACE, null);
 
-        assertEquals(result.size(), 2);
-        assertEquals(result.get(0).getName(), "fn-a");
-        assertEquals(result.get(0).getState(), running);
-        assertEquals(result.get(1).getName(), "fn-b");
-        assertEquals(result.get(1).getState(), stopped);
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-a");
+        assertEquals(result.getSummaries().get(0).getState(), running);
+        assertEquals(result.getSummaries().get(1).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(1).getState(), stopped);
     }
 
     @Test

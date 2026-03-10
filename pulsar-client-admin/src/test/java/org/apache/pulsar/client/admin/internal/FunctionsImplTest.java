@@ -33,6 +33,7 @@ import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.GenericType;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.testng.annotations.Test;
 
@@ -54,12 +55,14 @@ public class FunctionsImplTest {
         when(statusTarget.path("summary")).thenReturn(summaryTarget);
 
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
-        List<FunctionStatusSummary> expected = Collections.singletonList(
-                FunctionStatusSummary.builder().name("fn-1").state(FunctionStatusSummary.SummaryState.RUNNING).build());
-        CompletableFuture<List<FunctionStatusSummary>> response = CompletableFuture.completedFuture(expected);
+        FunctionStatusPage expected = FunctionStatusPage.builder()
+                .summaries(Collections.singletonList(
+                        FunctionStatusSummary.builder().name("fn-1").state(FunctionStatusSummary.SummaryState.RUNNING).build()))
+                .build();
+        CompletableFuture<FunctionStatusPage> response = CompletableFuture.completedFuture(expected);
         doReturn(response).when(functions).asyncGetRequest(eq(summaryTarget), any(GenericType.class));
 
-        List<FunctionStatusSummary> actual =
+        FunctionStatusPage actual =
                 functions.getFunctionsWithStatusAsync("tenant-a", "namespace-a").get();
 
         verify(adminV3Functions).path("tenant-a");
@@ -85,12 +88,14 @@ public class FunctionsImplTest {
         when(statusTarget.path("summary")).thenReturn(summaryTarget);
 
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
-        List<FunctionStatusSummary> expected = Collections.singletonList(
-                FunctionStatusSummary.builder().name("fn-2").state(FunctionStatusSummary.SummaryState.STOPPED).build());
-        CompletableFuture<List<FunctionStatusSummary>> response = CompletableFuture.completedFuture(expected);
+        FunctionStatusPage expected = FunctionStatusPage.builder()
+                .summaries(Collections.singletonList(
+                        FunctionStatusSummary.builder().name("fn-2").state(FunctionStatusSummary.SummaryState.STOPPED).build()))
+                .build();
+        CompletableFuture<FunctionStatusPage> response = CompletableFuture.completedFuture(expected);
         doReturn(response).when(functions).asyncGetRequest(eq(summaryTarget), any(GenericType.class));
 
-        List<FunctionStatusSummary> actual = functions.getFunctionsWithStatus("tenant-b", "namespace-b");
+        FunctionStatusPage actual = functions.getFunctionsWithStatus("tenant-b", "namespace-b");
         assertEquals(actual, expected);
     }
 
@@ -110,7 +115,7 @@ public class FunctionsImplTest {
         when(statusTarget.path("summary")).thenReturn(summaryTarget);
 
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
-        CompletableFuture<List<FunctionStatusSummary>> failed = new CompletableFuture<>();
+        CompletableFuture<FunctionStatusPage> failed = new CompletableFuture<>();
         failed.completeExceptionally(new PulsarAdminException.NotFoundException(null, "Not Found", 404));
         doReturn(failed).when(functions).asyncGetRequest(eq(summaryTarget), any(GenericType.class));
         doReturn(CompletableFuture.completedFuture(List.of("fn-b", "fn-a")))
@@ -127,14 +132,14 @@ public class FunctionsImplTest {
         doReturn(CompletableFuture.completedFuture(runningStatus))
                 .when(functions).getFunctionStatusAsync("tenant-c", "namespace-c", "fn-a");
 
-        List<FunctionStatusSummary> actual =
+        FunctionStatusPage actual =
                 functions.getFunctionsWithStatusAsync("tenant-c", "namespace-c").get();
 
-        assertEquals(actual.size(), 2);
-        assertEquals(actual.get(0).getName(), "fn-a");
-        assertEquals(actual.get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
-        assertEquals(actual.get(1).getName(), "fn-b");
-        assertEquals(actual.get(1).getState(), FunctionStatusSummary.SummaryState.STOPPED);
+        assertEquals(actual.getSummaries().size(), 2);
+        assertEquals(actual.getSummaries().get(0).getName(), "fn-a");
+        assertEquals(actual.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(actual.getSummaries().get(1).getName(), "fn-b");
+        assertEquals(actual.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.STOPPED);
     }
 
     @Test
@@ -157,7 +162,7 @@ public class FunctionsImplTest {
         when(limitTarget.queryParam("continuationToken", "fn-a")).thenReturn(continuationTarget);
 
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
-        CompletableFuture<List<FunctionStatusSummary>> failed = new CompletableFuture<>();
+        CompletableFuture<FunctionStatusPage> failed = new CompletableFuture<>();
         failed.completeExceptionally(new PulsarAdminException.NotFoundException(null, "Not Found", 404));
         doReturn(failed).when(functions).asyncGetRequest(eq(continuationTarget), any(GenericType.class));
         doReturn(CompletableFuture.completedFuture(List.of("fn-c", "fn-a", "fn-b")))
@@ -169,11 +174,11 @@ public class FunctionsImplTest {
         doReturn(CompletableFuture.completedFuture(runningStatus))
                 .when(functions).getFunctionStatusAsync("tenant-d", "namespace-d", "fn-b");
 
-        List<FunctionStatusSummary> actual =
+        FunctionStatusPage actual =
                 functions.getFunctionsWithStatusAsync("tenant-d", "namespace-d", 1, "fn-a").get();
 
-        assertEquals(actual.size(), 1);
-        assertEquals(actual.get(0).getName(), "fn-b");
+        assertEquals(actual.getSummaries().size(), 1);
+        assertEquals(actual.getSummaries().get(0).getName(), "fn-b");
         verify(functions).getFunctionStatusAsync("tenant-d", "namespace-d", "fn-b");
         verify(functions, never()).getFunctionStatusAsync("tenant-d", "namespace-d", "fn-a");
         verify(functions, never()).getFunctionStatusAsync("tenant-d", "namespace-d", "fn-c");

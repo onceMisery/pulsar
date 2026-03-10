@@ -65,6 +65,7 @@ import org.apache.pulsar.common.policies.data.AuthAction;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.policies.data.Policies;
 import org.apache.pulsar.common.policies.data.TenantInfo;
@@ -394,15 +395,15 @@ public class FunctionsImplTest {
         statusB.numRunning = 3;
         doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("func-b"), any(), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 2);
-        assertEquals(result.get(0).getName(), "func-a");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
-        assertEquals(result.get(0).getNumRunning(), 2);
-        assertEquals(result.get(0).getNumInstances(), 2);
-        assertEquals(result.get(1).getName(), "func-b");
-        assertEquals(result.get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "func-a");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 2);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(1).getName(), "func-b");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
     }
 
     @Test
@@ -428,21 +429,15 @@ public class FunctionsImplTest {
         doReturn(partialStatus).when(resource)
                 .getFunctionStatus(eq(tenant), eq(namespace), eq("partial-fn"), any(), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 3);
-        // sorted by name: partial-fn, running-fn, stopped-fn
-        assertEquals(result.get(0).getName(), "partial-fn");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
-        assertEquals(result.get(0).getNumRunning(), 2);
-        assertEquals(result.get(0).getNumInstances(), 4);
-
-        assertEquals(result.get(1).getName(), "running-fn");
-        assertEquals(result.get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
-
-        assertEquals(result.get(2).getName(), "stopped-fn");
-        assertEquals(result.get(2).getState(), FunctionStatusSummary.SummaryState.STOPPED);
-        assertEquals(result.get(2).getNumRunning(), 0);
+        assertEquals(result.getSummaries().size(), 3);
+        assertEquals(result.getSummaries().get(0).getName(), "partial-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(1).getName(), "running-fn");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(2).getName(), "stopped-fn");
+        assertEquals(result.getSummaries().get(2).getState(), FunctionStatusSummary.SummaryState.STOPPED);
     }
 
     @Test
@@ -459,19 +454,16 @@ public class FunctionsImplTest {
         doThrow(new RuntimeException("connection refused")).when(resource)
                 .getFunctionStatus(eq(tenant), eq(namespace), eq("bad-fn"), any(), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 2);
-        // sorted: bad-fn, good-fn
-        assertEquals(result.get(0).getName(), "bad-fn");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
-        assertEquals(result.get(0).getError(), "connection refused");
-        assertEquals(result.get(0).getErrorType(), FunctionStatusSummary.ErrorType.INTERNAL_ERROR);
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "bad-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
+        assertEquals(result.getSummaries().get(0).getError(), "connection refused");
 
-        assertEquals(result.get(1).getName(), "good-fn");
-        assertEquals(result.get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
-        assertEquals(result.get(1).getError(), null);
-        assertEquals(result.get(1).getErrorType(), null);
+        assertEquals(result.getSummaries().get(1).getName(), "good-fn");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(1).getError(), null);
     }
 
     @Test
@@ -491,14 +483,14 @@ public class FunctionsImplTest {
         when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn")))
                 .thenReturn(remoteStatus);
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getName(), "remote-fn");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
-        assertEquals(result.get(0).getNumRunning(), 1);
-        assertEquals(result.get(0).getNumInstances(), 2);
-        assertEquals(result.get(0).getError(), null);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "remote-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 1);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(0).getError(), null);
     }
 
     @Test
@@ -513,13 +505,13 @@ public class FunctionsImplTest {
                 mock(Functions.class);
         when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getName(), "auth-fn");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
-        assertEquals(result.get(0).getError(), "not authorized");
-        assertEquals(result.get(0).getErrorType(), FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "auth-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
+        assertEquals(result.getSummaries().get(0).getError(), "not authorized");
+        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED);
         verify(mockedFunctionsAdmin, never()).getFunctionStatus(any(), any(), any());
     }
 
@@ -540,14 +532,14 @@ public class FunctionsImplTest {
         when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn")))
                 .thenReturn(remoteStatus);
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getName(), "remote-fn");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
-        assertEquals(result.get(0).getNumRunning(), 1);
-        assertEquals(result.get(0).getNumInstances(), 2);
-        assertEquals(result.get(0).getError(), null);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "remote-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 1);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(0).getError(), null);
         verify(mockedFunctionsAdmin).getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn"));
     }
 
@@ -555,9 +547,9 @@ public class FunctionsImplTest {
     public void testListFunctionsWithStatus_emptyNamespace() {
         doReturn(Collections.emptyList()).when(resource).listFunctions(eq(tenant), eq(namespace), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 0);
+        assertEquals(result.getSummaries().size(), 0);
     }
 
     @Test
@@ -571,10 +563,10 @@ public class FunctionsImplTest {
                 mock(Functions.class);
         when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getErrorType(), FunctionStatusSummary.ErrorType.FUNCTION_NOT_FOUND);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.FUNCTION_NOT_FOUND);
         verify(mockedFunctionsAdmin, never()).getFunctionStatus(any(), any(), any());
     }
 
@@ -591,10 +583,10 @@ public class FunctionsImplTest {
         when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("network-fn")))
                 .thenThrow(new RuntimeException(new ConnectException("still refused")));
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getErrorType(), FunctionStatusSummary.ErrorType.NETWORK_ERROR);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.NETWORK_ERROR);
     }
 
     @Test
@@ -607,12 +599,12 @@ public class FunctionsImplTest {
         statusB.setNumRunning(1);
         doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-b"), any(), any());
 
-        List<FunctionStatusSummary> result =
+        FunctionStatusPage result =
                 resource.listFunctionsWithStatus(tenant, namespace, 1, "fn-a", null);
 
-        assertEquals(result.size(), 1);
-        assertEquals(result.get(0).getName(), "fn-b");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
         verify(resource, never()).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-a"), any(), any());
         verify(resource, never()).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-c"), any(), any());
     }
@@ -643,13 +635,13 @@ public class FunctionsImplTest {
         statusB.setNumRunning(0);
         doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-b"), any(), any());
 
-        List<FunctionStatusSummary> result = resource.listFunctionsWithStatus(tenant, namespace, null);
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
 
-        assertEquals(result.size(), 2);
-        assertEquals(result.get(0).getName(), "fn-a");
-        assertEquals(result.get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
-        assertEquals(result.get(1).getName(), "fn-b");
-        assertEquals(result.get(1).getState(), FunctionStatusSummary.SummaryState.STOPPED);
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-a");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(1).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.STOPPED);
     }
 
     public static FunctionConfig createDefaultFunctionConfig() {

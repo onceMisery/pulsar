@@ -804,7 +804,7 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
     }
 
     @Override
-    public List<FunctionStatusSummary> listFunctionsWithStatus(
+    public FunctionStatusPage listFunctionsWithStatus(
             final String tenant,
             final String namespace,
             final AuthenticationParameters authParams) {
