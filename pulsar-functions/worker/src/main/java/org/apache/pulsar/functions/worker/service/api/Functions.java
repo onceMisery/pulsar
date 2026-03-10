@@ -29,7 +29,6 @@ import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
 import org.apache.pulsar.common.policies.data.FunctionStatus.FunctionInstanceStatus.FunctionInstanceStatusData;
 import org.apache.pulsar.common.policies.data.FunctionStatusPage;
-import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.worker.WorkerService;
 import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
 
