@@ -48,6 +48,7 @@ import org.apache.pulsar.client.admin.Functions;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
 import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.functions.api.Context;
 import org.apache.pulsar.functions.api.Function;
@@ -922,14 +923,16 @@ public class CmdFunctionsTest {
 
     @Test
     public void testListFunctionsLongFormat() throws Exception {
-        List<FunctionStatusSummary> summaries = List.of(
-                FunctionStatusSummary.builder()
-                        .name("fn-a")
-                        .state(FunctionStatusSummary.SummaryState.RUNNING)
-                        .numInstances(2).numRunning(2).build()
-        );
+        FunctionStatusPage statusPage = FunctionStatusPage.builder()
+                .summaries(List.of(
+                        FunctionStatusSummary.builder()
+                                .name("fn-a")
+                                .state(FunctionStatusSummary.SummaryState.RUNNING)
+                                .numInstances(2).numRunning(2).build()
+                ))
+                .build();
         when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE)))
-                .thenReturn(summaries);
+                .thenReturn(statusPage);
 
         cmd.run(new String[] {
                 "list",
@@ -946,18 +949,20 @@ public class CmdFunctionsTest {
 
     @Test
     public void testListFunctionsWithStateFilter() throws Exception {
-        List<FunctionStatusSummary> summaries = List.of(
-                FunctionStatusSummary.builder()
-                        .name("fn-running")
-                        .state(FunctionStatusSummary.SummaryState.RUNNING)
-                        .numInstances(1).numRunning(1).build(),
-                FunctionStatusSummary.builder()
-                        .name("fn-stopped")
-                        .state(FunctionStatusSummary.SummaryState.STOPPED)
-                        .numInstances(1).numRunning(0).build()
-        );
+        FunctionStatusPage statusPage = FunctionStatusPage.builder()
+                .summaries(List.of(
+                        FunctionStatusSummary.builder()
+                                .name("fn-running")
+                                .state(FunctionStatusSummary.SummaryState.RUNNING)
+                                .numInstances(1).numRunning(1).build(),
+                        FunctionStatusSummary.builder()
+                                .name("fn-stopped")
+                                .state(FunctionStatusSummary.SummaryState.STOPPED)
+                                .numInstances(1).numRunning(0).build()
+                ))
+                .build();
         when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE)))
-                .thenReturn(summaries);
+                .thenReturn(statusPage);
 
         cmd.run(new String[] {
                 "list",
@@ -974,19 +979,21 @@ public class CmdFunctionsTest {
 
     @Test
     public void testListFunctionsWithUnknownStateFilter() throws Exception {
-        List<FunctionStatusSummary> summaries = List.of(
-                FunctionStatusSummary.builder()
-                        .name("fn-unknown")
-                        .state(FunctionStatusSummary.SummaryState.UNKNOWN)
-                        .error("status unavailable")
-                        .build(),
-                FunctionStatusSummary.builder()
-                        .name("fn-running")
-                        .state(FunctionStatusSummary.SummaryState.RUNNING)
-                        .numInstances(1).numRunning(1).build()
-        );
+        FunctionStatusPage statusPage = FunctionStatusPage.builder()
+                .summaries(List.of(
+                        FunctionStatusSummary.builder()
+                                .name("fn-unknown")
+                                .state(FunctionStatusSummary.SummaryState.UNKNOWN)
+                                .error("status unavailable")
+                                .build(),
+                        FunctionStatusSummary.builder()
+                                .name("fn-running")
+                                .state(FunctionStatusSummary.SummaryState.RUNNING)
+                                .numInstances(1).numRunning(1).build()
+                ))
+                .build();
         when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE)))
-                .thenReturn(summaries);
+                .thenReturn(statusPage);
 
         @Cleanup
         StringWriter stringWriter = new StringWriter();
@@ -1032,16 +1039,18 @@ public class CmdFunctionsTest {
 
     @Test
     public void testListFunctionsWithPaginationParams() throws Exception {
-        List<FunctionStatusSummary> summaries = List.of(
-                FunctionStatusSummary.builder()
-                        .name("fn-b")
-                        .state(FunctionStatusSummary.SummaryState.RUNNING)
-                        .numInstances(1)
-                        .numRunning(1)
-                        .build()
-        );
+        FunctionStatusPage statusPage = FunctionStatusPage.builder()
+                .summaries(List.of(
+                        FunctionStatusSummary.builder()
+                                .name("fn-b")
+                                .state(FunctionStatusSummary.SummaryState.RUNNING)
+                                .numInstances(1)
+                                .numRunning(1)
+                                .build()
+                ))
+                .build();
         when(functions.getFunctionsWithStatus(eq(TENANT), eq(NAMESPACE), eq(1), eq("fn-a")))
-                .thenReturn(summaries);
+                .thenReturn(statusPage);
 
         cmd.run(new String[] {
                 "list",
