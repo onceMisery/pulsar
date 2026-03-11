@@ -511,7 +511,9 @@ public class FunctionsImplTest {
         assertEquals(result.getSummaries().get(0).getName(), "auth-fn");
         assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
         assertEquals(result.getSummaries().get(0).getError(), "not authorized");
-        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED);
+        assertEquals(
+                result.getSummaries().get(0).getErrorType(),
+                FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED);
         verify(mockedFunctionsAdmin, never()).getFunctionStatus(any(), any(), any());
     }
 
