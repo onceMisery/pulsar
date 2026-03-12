@@ -21,15 +21,20 @@ package org.apache.pulsar.functions.worker.rest.api;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
 import java.io.InputStream;
+import java.net.ConnectException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,6 +44,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import javax.ws.rs.core.Response;
 import org.apache.distributedlog.api.namespace.Namespace;
 import org.apache.pulsar.broker.authentication.AuthenticationDataSource;
 import org.apache.pulsar.broker.authentication.AuthenticationParameters;
@@ -46,6 +52,7 @@ import org.apache.pulsar.broker.authorization.AuthorizationService;
 import org.apache.pulsar.broker.resources.NamespaceResources;
 import org.apache.pulsar.broker.resources.PulsarResources;
 import org.apache.pulsar.broker.resources.TenantResources;
+import org.apache.pulsar.client.admin.Functions;
 import org.apache.pulsar.client.admin.Namespaces;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
@@ -57,6 +64,9 @@ import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.policies.data.AuthAction;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsImpl;
 import org.apache.pulsar.common.policies.data.FunctionStatsImpl;
+import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.policies.data.Policies;
 import org.apache.pulsar.common.policies.data.TenantInfo;
 import org.apache.pulsar.common.util.RestException;
@@ -147,6 +157,7 @@ public class FunctionsImplTest {
         when(mockedWorkerService.getDlogNamespace()).thenReturn(mockedNamespace);
         when(mockedWorkerService.isInitialized()).thenReturn(true);
         when(mockedWorkerService.getBrokerAdmin()).thenReturn(mockedPulsarAdmin);
+        when(mockedWorkerService.getFunctionAdmin()).thenReturn(mockedPulsarAdmin);
         when(mockedPulsarAdmin.tenants()).thenReturn(mockedTenants);
         when(mockedPulsarAdmin.namespaces()).thenReturn(mockedNamespaces);
         when(mockedTenants.getTenantInfo(any())).thenReturn(mockedTenantInfo);
@@ -369,6 +380,272 @@ public class FunctionsImplTest {
         assertFalse(functionImpl.isSuperUser("non-superuser", nonSuperuserAuthData));
     }
 
+    @Test
+    public void testListFunctionsWithStatus_allRunning() {
+        List<String> functionNames = List.of("func-a", "func-b");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatus statusA = new FunctionStatus();
+        statusA.setNumInstances(2);
+        statusA.numRunning = 2;
+        doReturn(statusA).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("func-a"), any(), any());
+
+        FunctionStatus statusB = new FunctionStatus();
+        statusB.setNumInstances(3);
+        statusB.numRunning = 3;
+        doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("func-b"), any(), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "func-a");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 2);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(1).getName(), "func-b");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_mixedStates() {
+        List<String> functionNames = List.of("running-fn", "stopped-fn", "partial-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatus runningStatus = new FunctionStatus();
+        runningStatus.setNumInstances(2);
+        runningStatus.numRunning = 2;
+        doReturn(runningStatus).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("running-fn"), any(), any());
+
+        FunctionStatus stoppedStatus = new FunctionStatus();
+        stoppedStatus.setNumInstances(3);
+        stoppedStatus.numRunning = 0;
+        doReturn(stoppedStatus).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("stopped-fn"), any(), any());
+
+        FunctionStatus partialStatus = new FunctionStatus();
+        partialStatus.setNumInstances(4);
+        partialStatus.numRunning = 2;
+        doReturn(partialStatus).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("partial-fn"), any(), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 3);
+        assertEquals(result.getSummaries().get(0).getName(), "partial-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(1).getName(), "running-fn");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(2).getName(), "stopped-fn");
+        assertEquals(result.getSummaries().get(2).getState(), FunctionStatusSummary.SummaryState.STOPPED);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_partialFailureIsolation() {
+        List<String> functionNames = List.of("good-fn", "bad-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatus goodStatus = new FunctionStatus();
+        goodStatus.setNumInstances(1);
+        goodStatus.numRunning = 1;
+        doReturn(goodStatus).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("good-fn"), any(), any());
+
+        doThrow(new RuntimeException("connection refused")).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("bad-fn"), any(), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "bad-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
+        assertEquals(result.getSummaries().get(0).getError(), "connection refused");
+
+        assertEquals(result.getSummaries().get(1).getName(), "good-fn");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(1).getError(), null);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_fallbackToFunctionAdmin() throws Exception {
+        List<String> functionNames = List.of("remote-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        doThrow(new RuntimeException("local path failed")).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn"), any(), any());
+
+        FunctionStatus remoteStatus = new FunctionStatus();
+        remoteStatus.setNumInstances(2);
+        remoteStatus.numRunning = 1;
+        Functions mockedFunctionsAdmin =
+                mock(Functions.class);
+        when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
+        when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn")))
+                .thenReturn(remoteStatus);
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "remote-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 1);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(0).getError(), null);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_noFallbackForRestException() throws Exception {
+        List<String> functionNames = List.of("auth-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        doThrow(new RestException(Response.Status.UNAUTHORIZED, "not authorized")).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("auth-fn"), any(), any());
+
+        Functions mockedFunctionsAdmin =
+                mock(Functions.class);
+        when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "auth-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.UNKNOWN);
+        assertEquals(result.getSummaries().get(0).getError(), "not authorized");
+        assertEquals(
+                result.getSummaries().get(0).getErrorType(),
+                FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED);
+        verify(mockedFunctionsAdmin, never()).getFunctionStatus(any(), any(), any());
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_fallbackForServerSideRestException() throws Exception {
+        List<String> functionNames = List.of("remote-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        doThrow(new RestException(Response.Status.INTERNAL_SERVER_ERROR, "local status failed")).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn"), any(), any());
+
+        FunctionStatus remoteStatus = new FunctionStatus();
+        remoteStatus.setNumInstances(2);
+        remoteStatus.numRunning = 1;
+        Functions mockedFunctionsAdmin =
+                mock(Functions.class);
+        when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
+        when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn")))
+                .thenReturn(remoteStatus);
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "remote-fn");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.PARTIAL);
+        assertEquals(result.getSummaries().get(0).getNumRunning(), 1);
+        assertEquals(result.getSummaries().get(0).getNumInstances(), 2);
+        assertEquals(result.getSummaries().get(0).getError(), null);
+        verify(mockedFunctionsAdmin).getFunctionStatus(eq(tenant), eq(namespace), eq("remote-fn"));
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_emptyNamespace() {
+        doReturn(Collections.emptyList()).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 0);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_notFoundErrorType() throws Exception {
+        List<String> functionNames = List.of("missing-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+        doThrow(new RestException(Response.Status.NOT_FOUND, "function not found")).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("missing-fn"), any(), any());
+
+        Functions mockedFunctionsAdmin =
+                mock(Functions.class);
+        when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.FUNCTION_NOT_FOUND);
+        verify(mockedFunctionsAdmin, never()).getFunctionStatus(any(), any(), any());
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_networkErrorType() throws Exception {
+        List<String> functionNames = List.of("network-fn");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+        doThrow(new RuntimeException(new ConnectException("refused"))).when(resource)
+                .getFunctionStatus(eq(tenant), eq(namespace), eq("network-fn"), any(), any());
+
+        Functions mockedFunctionsAdmin =
+                mock(Functions.class);
+        when(mockedPulsarAdmin.functions()).thenReturn(mockedFunctionsAdmin);
+        when(mockedFunctionsAdmin.getFunctionStatus(eq(tenant), eq(namespace), eq("network-fn")))
+                .thenThrow(new RuntimeException(new ConnectException("still refused")));
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getErrorType(), FunctionStatusSummary.ErrorType.NETWORK_ERROR);
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_pagination() {
+        List<String> functionNames = List.of("fn-c", "fn-a", "fn-b");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatus statusB = new FunctionStatus();
+        statusB.setNumInstances(1);
+        statusB.setNumRunning(1);
+        doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-b"), any(), any());
+
+        FunctionStatusPage result =
+                resource.listFunctionsWithStatus(tenant, namespace, 1, "fn-a", null);
+
+        assertEquals(result.getSummaries().size(), 1);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        verify(resource, never()).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-a"), any(), any());
+        verify(resource, never()).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-c"), any(), any());
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_invalidLimit() {
+        try {
+            resource.listFunctionsWithStatus(tenant, namespace, 0, null, null);
+            org.testng.Assert.fail("Expected RestException");
+        } catch (RestException e) {
+            assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
+        }
+    }
+
+    @Test
+    public void testListFunctionsWithStatus_usesConfiguredParallelism() {
+        mockedWorkerService.getWorkerConfig().setFunctionsStatusSummaryMaxParallelism(1);
+        List<String> functionNames = List.of("fn-b", "fn-a");
+        doReturn(functionNames).when(resource).listFunctions(eq(tenant), eq(namespace), any());
+
+        FunctionStatus statusA = new FunctionStatus();
+        statusA.setNumInstances(1);
+        statusA.setNumRunning(1);
+        doReturn(statusA).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-a"), any(), any());
+
+        FunctionStatus statusB = new FunctionStatus();
+        statusB.setNumInstances(1);
+        statusB.setNumRunning(0);
+        doReturn(statusB).when(resource).getFunctionStatus(eq(tenant), eq(namespace), eq("fn-b"), any(), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(tenant, namespace, null);
+
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-a");
+        assertEquals(result.getSummaries().get(0).getState(), FunctionStatusSummary.SummaryState.RUNNING);
+        assertEquals(result.getSummaries().get(1).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(1).getState(), FunctionStatusSummary.SummaryState.STOPPED);
+    }
+
     public static FunctionConfig createDefaultFunctionConfig() {
         FunctionConfig functionConfig = new FunctionConfig();
         functionConfig.setTenant(tenant);
@@ -388,3 +665,4 @@ public class FunctionsImplTest {
         return FunctionConfigUtils.convert(functionConfig);
     }
 }
+

@@ -18,6 +18,8 @@
  */
 package org.apache.pulsar.client.admin;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -32,6 +34,8 @@ import org.apache.pulsar.common.io.ConnectorDefinition;
 import org.apache.pulsar.common.policies.data.FunctionInstanceStatsData;
 import org.apache.pulsar.common.policies.data.FunctionStats;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 
 /**
  * Admin interface for function management.
@@ -68,6 +72,148 @@ public interface Functions {
      *
      */
     CompletableFuture<List<String>> getFunctionsAsync(String tenant, String namespace);
+
+    /**
+     * Get a batch status summary for all functions in a namespace.
+     * <p/>
+     * Returns a lightweight summary (name, state, instance counts) for every function
+     * under the given tenant/namespace in a single API call. This is not equivalent to
+     * calling {@link #getFunctionStatus} for each function - it returns only aggregated
+     * counts, not per-instance details.
+     * <p/>
+     * Individual function failures are isolated: a function whose status cannot be
+     * retrieved will appear with {@code state = UNKNOWN} and a non-null {@code error}.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     *
+     * @return list of status summaries, one per function
+     *
+     * @throws NotAuthorizedException
+     *             Don't have admin permission
+     * @throws PulsarAdminException
+     *             Unexpected error
+     */
+    default FunctionStatusPage getFunctionsWithStatus(String tenant, String namespace)
+            throws PulsarAdminException {
+        return getFunctionsWithStatus(tenant, namespace, null, null);
+    }
+
+    /**
+     * Get a batch status summary for all functions in a namespace asynchronously.
+     * <p/>
+     * Async version of {@link #getFunctionsWithStatus(String, String)}.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     *
+     * @return a future that completes with the list of status summaries
+     */
+    default CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(String tenant,
+                                                                               String namespace) {
+        return getFunctionsWithStatusAsync(tenant, namespace, null, null);
+    }
+
+    /**
+     * Get a paginated batch status summary for functions in a namespace.
+     * <p/>
+     * The {@code startAfter} is an exclusive cursor based on function name
+     * in lexicographical order.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     * @param limit
+     *            Maximum number of functions to return; must be greater than 0 when provided
+     * @param startAfter
+     *            Exclusive continuation token from previous page; null means from beginning
+     * @return list of status summaries for the requested page
+     * @throws PulsarAdminException
+     *             Unexpected error
+     */
+    default FunctionStatusPage getFunctionsWithStatus(
+            String tenant, String namespace, Integer limit, String startAfter)
+            throws PulsarAdminException {
+        if (limit != null && limit <= 0) {
+            throw new IllegalArgumentException("limit must be greater than 0");
+        }
+
+        List<String> functionNames = getFunctions(tenant, namespace);
+        List<String> pagedNames = new ArrayList<>(functionNames);
+        pagedNames.sort(String::compareTo);
+
+        int startIndex = 0;
+        if (startAfter != null && !startAfter.isEmpty()) {
+            while (startIndex < pagedNames.size() && pagedNames.get(startIndex).compareTo(startAfter) <= 0) {
+                startIndex++;
+            }
+        }
+
+        int endIndex = limit == null ? pagedNames.size() : Math.min(pagedNames.size(), startIndex + limit);
+        List<FunctionStatusSummary> summaries = new ArrayList<>(Math.max(0, endIndex - startIndex));
+        for (int index = startIndex; index < endIndex; index++) {
+            String functionName = pagedNames.get(index);
+            try {
+                FunctionStatus status = getFunctionStatus(tenant, namespace, functionName);
+                FunctionStatusSummary.SummaryState state = status.getNumInstances() <= 0
+                        ? FunctionStatusSummary.SummaryState.UNKNOWN
+                        : status.getNumRunning() == status.getNumInstances()
+                                ? FunctionStatusSummary.SummaryState.RUNNING
+                                : status.getNumRunning() == 0
+                                        ? FunctionStatusSummary.SummaryState.STOPPED
+                                        : FunctionStatusSummary.SummaryState.PARTIAL;
+                summaries.add(FunctionStatusSummary.builder()
+                        .name(functionName)
+                        .state(state)
+                        .numInstances(status.getNumInstances())
+                        .numRunning(status.getNumRunning())
+                        .build());
+            } catch (PulsarAdminException e) {
+                summaries.add(FunctionStatusSummary.builder()
+                        .name(functionName)
+                        .state(FunctionStatusSummary.SummaryState.UNKNOWN)
+                        .error(e.getMessage())
+                        .build());
+            }
+        }
+        summaries.sort(Comparator.comparing(FunctionStatusSummary::getName));
+
+        String nextStartAfter = endIndex < pagedNames.size() ? pagedNames.get(endIndex - 1) : null;
+        return FunctionStatusPage.builder()
+                .summaries(summaries)
+                .nextStartAfter(nextStartAfter)
+                .build();
+    }
+
+    /**
+     * Async paginated version of {@link #getFunctionsWithStatus(String, String, Integer, String)}.
+     *
+     * @param tenant
+     *            Tenant name
+     * @param namespace
+     *            Namespace name
+     * @param limit
+     *            Maximum number of functions to return; must be greater than 0 when provided
+     * @param startAfter
+     *            Exclusive cursor (function name) from previous page; null means from beginning
+     * @return a future that completes with the paginated response
+     */
+    default CompletableFuture<FunctionStatusPage> getFunctionsWithStatusAsync(
+            String tenant, String namespace, Integer limit, String startAfter) {
+        try {
+            return CompletableFuture.completedFuture(
+                    getFunctionsWithStatus(tenant, namespace, limit, startAfter));
+        } catch (Exception e) {
+            CompletableFuture<FunctionStatusPage> future = new CompletableFuture<>();
+            future.completeExceptionally(e);
+            return future;
+        }
+    }
 
     /**
      * Get the configuration for the specified function.

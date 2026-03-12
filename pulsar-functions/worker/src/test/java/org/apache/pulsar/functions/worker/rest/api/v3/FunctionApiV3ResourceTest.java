@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
@@ -41,6 +42,9 @@ import org.apache.logging.log4j.core.config.Configurator;
 import org.apache.pulsar.broker.authentication.AuthenticationParameters;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
+import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.RestException;
 import org.apache.pulsar.functions.proto.Function;
 import org.apache.pulsar.functions.utils.FunctionConfigUtils;
@@ -436,6 +440,51 @@ public class FunctionApiV3ResourceTest extends AbstractFunctionApiResourceTest {
             Assert.fail();
         } catch (RuntimeException e) {
             Assert.assertEquals(e.getMessage(), injectedErrMsg);
+        }
+    }
+
+    @Test
+    public void testListFunctionsWithStatusSuccess() {
+        mockInstanceUtils();
+        List<Function.FunctionMetaData> metaDataList = List.of(
+                Function.FunctionMetaData.newBuilder().setFunctionDetails(
+                        Function.FunctionDetails.newBuilder().setName("fn-a").build()).build(),
+                Function.FunctionMetaData.newBuilder().setFunctionDetails(
+                        Function.FunctionDetails.newBuilder().setName("fn-b").build()).build()
+        );
+        when(mockedManager.listFunctions(eq(TENANT), eq(NAMESPACE))).thenReturn(metaDataList);
+
+        FunctionStatusSummary.SummaryState running = FunctionStatusSummary.SummaryState.RUNNING;
+        FunctionStatusSummary.SummaryState stopped = FunctionStatusSummary.SummaryState.STOPPED;
+
+        FunctionStatus statusA = new FunctionStatus();
+        statusA.setNumInstances(2);
+        statusA.setNumRunning(2);
+        doReturn(statusA).when(resource)
+                .getFunctionStatus(eq(TENANT), eq(NAMESPACE), eq("fn-a"), any(), any());
+
+        FunctionStatus statusB = new FunctionStatus();
+        statusB.setNumInstances(1);
+        statusB.setNumRunning(0);
+        doReturn(statusB).when(resource)
+                .getFunctionStatus(eq(TENANT), eq(NAMESPACE), eq("fn-b"), any(), any());
+
+        FunctionStatusPage result = resource.listFunctionsWithStatus(TENANT, NAMESPACE, null);
+
+        assertEquals(result.getSummaries().size(), 2);
+        assertEquals(result.getSummaries().get(0).getName(), "fn-a");
+        assertEquals(result.getSummaries().get(0).getState(), running);
+        assertEquals(result.getSummaries().get(1).getName(), "fn-b");
+        assertEquals(result.getSummaries().get(1).getState(), stopped);
+    }
+
+    @Test
+    public void testListFunctionsWithStatusMissingNamespace() {
+        try {
+            resource.listFunctionsWithStatus(TENANT, null, null);
+            Assert.fail("Expected RestException");
+        } catch (RestException e) {
+            assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
         }
     }
 

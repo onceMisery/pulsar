@@ -27,18 +27,30 @@ import com.google.protobuf.ByteString;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.UnknownHostException;
+import java.nio.channels.UnresolvedAddressException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pulsar.broker.authentication.AuthenticationParameters;
+import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.common.functions.FunctionConfig;
 import org.apache.pulsar.common.functions.FunctionDefinition;
@@ -47,6 +59,8 @@ import org.apache.pulsar.common.functions.Utils;
 import org.apache.pulsar.common.functions.WorkerInfo;
 import org.apache.pulsar.common.policies.data.ExceptionInformation;
 import org.apache.pulsar.common.policies.data.FunctionStatus;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.RestException;
 import org.apache.pulsar.functions.auth.FunctionAuthData;
 import org.apache.pulsar.functions.instance.InstanceUtils;
@@ -743,7 +757,7 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
         ValidatableFunctionPackage functionPackage = null;
         // check if function is builtin and extract classloader
         if (!StringUtils.isEmpty(archive)) {
-            if (archive.startsWith(org.apache.pulsar.common.functions.Utils.BUILTIN)) {
+            if (archive.startsWith(Utils.BUILTIN)) {
                 archive = archive.replaceFirst("^builtin://", "");
 
                 FunctionsManager functionsManager = worker().getFunctionsManager();
@@ -787,5 +801,242 @@ public class FunctionsImpl extends ComponentImpl implements Functions<PulsarWork
                 }
             }
         }
+    }
+
+    @Override
+    public FunctionStatusPage listFunctionsWithStatus(
+            final String tenant,
+            final String namespace,
+            final AuthenticationParameters authParams) {
+        return listFunctionsWithStatus(tenant, namespace, null, null, authParams);
+    }
+
+    @Override
+    public FunctionStatusPage listFunctionsWithStatus(
+            final String tenant,
+            final String namespace,
+            final Integer limit,
+            final String startAfter,
+            final AuthenticationParameters authParams) {
+        if (!isWorkerServiceAvailable()) {
+            throwUnavailableException();
+        }
+        if (limit != null && limit <= 0) {
+            throw new RestException(Response.Status.BAD_REQUEST, "limit must be greater than 0");
+        }
+
+        long startNs = System.nanoTime();
+        ExecutorService summaryExecutor = null;
+        try {
+            // listFunctions already handles auth check and parameter validation
+            List<String> functionNames = listFunctions(tenant, namespace, authParams);
+            List<String> sorted = new ArrayList<>(functionNames);
+            sorted.sort(String::compareTo);
+            List<String> pagedNames = pageFunctionNames(functionNames, limit, startAfter);
+            if (pagedNames.isEmpty()) {
+                return FunctionStatusPage.builder()
+                        .summaries(Collections.emptyList())
+                        .nextStartAfter(null)
+                        .build();
+            }
+
+            int configuredParallelism = worker().getWorkerConfig() != null
+                    ? worker().getWorkerConfig().getFunctionsStatusSummaryMaxParallelism() : 4;
+            int maxConcurrency = Math.max(1, Math.min(configuredParallelism, pagedNames.size()));
+            summaryExecutor = Executors.newFixedThreadPool(maxConcurrency);
+            List<CompletableFuture<FunctionStatusSummary>> futures = new ArrayList<>(pagedNames.size());
+            for (String name : pagedNames) {
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> buildSummary(tenant, namespace, name, authParams), summaryExecutor));
+            }
+
+            List<FunctionStatusSummary> summaries = futures.stream()
+                    .map(CompletableFuture::join)
+                    .collect(Collectors.toList());
+
+            String nextStartAfter = null;
+            if (limit != null && !pagedNames.isEmpty()) {
+                String lastReturned = pagedNames.get(pagedNames.size() - 1);
+                int lastIndex = sorted.indexOf(lastReturned);
+                if (lastIndex >= 0 && lastIndex < sorted.size() - 1) {
+                    nextStartAfter = lastReturned;
+                }
+            }
+
+            return FunctionStatusPage.builder()
+                    .summaries(summaries)
+                    .nextStartAfter(nextStartAfter)
+                    .build();
+        } finally {
+            if (summaryExecutor != null) {
+                summaryExecutor.shutdown();
+                try {
+                    if (!summaryExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        summaryExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    summaryExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (worker().getWorkerStatsManager() != null) {
+                worker().getWorkerStatsManager()
+                        .observeFunctionsStatusSummaryQueryTime(((double) System.nanoTime() - startNs) / 1.0E6D);
+            }
+        }
+    }
+
+    private static List<String> pageFunctionNames(List<String> functionNames, Integer limit, String startAfter) {
+        if (functionNames.isEmpty()) {
+            return functionNames;
+        }
+        List<String> sorted = new ArrayList<>(functionNames);
+        sorted.sort(String::compareTo);
+
+        int startIndex = 0;
+        if (isNotBlank(startAfter)) {
+            while (startIndex < sorted.size() && sorted.get(startIndex).compareTo(startAfter) <= 0) {
+                startIndex++;
+            }
+        }
+        if (startIndex >= sorted.size()) {
+            return Collections.emptyList();
+        }
+        if (limit == null) {
+            return sorted.subList(startIndex, sorted.size());
+        }
+
+        int endIndex = Math.min(sorted.size(), startIndex + limit);
+        return sorted.subList(startIndex, endIndex);
+    }
+
+    private FunctionStatusSummary buildSummary(String tenant, String namespace,
+                                               String name, AuthenticationParameters authParams) {
+        try {
+            FunctionStatus status = getFunctionStatusForSummary(tenant, namespace, name, authParams);
+            return FunctionStatusSummary.builder()
+                    .name(name)
+                    .state(deriveState(status.getNumInstances(), status.getNumRunning()))
+                    .numInstances(status.getNumInstances())
+                    .numRunning(status.getNumRunning())
+                    .build();
+        } catch (Exception e) {
+            log.warn("{}/{}/{} Failed to get status for summary", tenant, namespace, name, e);
+            return FunctionStatusSummary.builder()
+                    .name(name)
+                    .state(FunctionStatusSummary.SummaryState.UNKNOWN)
+                    .error(e.getMessage())
+                    .errorType(classifyError(e))
+                    .build();
+        }
+    }
+
+    private FunctionStatus getFunctionStatusForSummary(String tenant, String namespace, String name,
+                                                       AuthenticationParameters authParams)
+            throws Exception {
+        try {
+            // Fast path: local worker service path.
+            return getFunctionStatus(tenant, namespace, name, null, authParams);
+        } catch (RestException localRestError) {
+            // Preserve local semantic 4xx errors (authn/authz/not-found/validation).
+            // 5xx errors are treated as recoverable and can still use admin fallback.
+            int status = localRestError.getResponse() != null ? localRestError.getResponse().getStatus() : 0;
+            if (status >= 400 && status < 500) {
+                throw localRestError;
+            }
+            return getFunctionStatusFromAdminFallback(tenant, namespace, name, localRestError);
+        } catch (Exception localError) {
+            return getFunctionStatusFromAdminFallback(tenant, namespace, name, localError);
+        }
+    }
+
+    private FunctionStatus getFunctionStatusFromAdminFallback(String tenant, String namespace, String name,
+                                                              Exception localError) throws Exception {
+        // Fallback: query through internal admin client to avoid local redirect/null-uri edge cases.
+        PulsarAdmin functionAdmin = worker().getFunctionAdmin();
+        if (functionAdmin == null || functionAdmin.functions() == null) {
+            throw localError;
+        }
+        try {
+            return functionAdmin.functions().getFunctionStatus(tenant, namespace, name);
+        } catch (PulsarAdminException remoteError) {
+            remoteError.addSuppressed(localError);
+            throw remoteError;
+        } catch (RuntimeException remoteRuntimeError) {
+            if (remoteRuntimeError != localError) {
+                localError.addSuppressed(remoteRuntimeError);
+            }
+            throw localError;
+        }
+    }
+
+    private static FunctionStatusSummary.SummaryState deriveState(int numInstances, int numRunning) {
+        if (numInstances <= 0) {
+            return FunctionStatusSummary.SummaryState.UNKNOWN;
+        }
+        if (numRunning == numInstances) {
+            return FunctionStatusSummary.SummaryState.RUNNING;
+        }
+        if (numRunning == 0) {
+            return FunctionStatusSummary.SummaryState.STOPPED;
+        }
+        return FunctionStatusSummary.SummaryState.PARTIAL;
+    }
+
+    private static FunctionStatusSummary.ErrorType classifyError(Throwable error) {
+        if (isAuthenticationError(error)) {
+            return FunctionStatusSummary.ErrorType.AUTHENTICATION_FAILED;
+        }
+        if (isFunctionNotFoundError(error)) {
+            return FunctionStatusSummary.ErrorType.FUNCTION_NOT_FOUND;
+        }
+        if (isNetworkError(error)) {
+            return FunctionStatusSummary.ErrorType.NETWORK_ERROR;
+        }
+        return FunctionStatusSummary.ErrorType.INTERNAL_ERROR;
+    }
+
+    private static boolean isAuthenticationError(Throwable error) {
+        if (error instanceof RestException) {
+            int status = getStatusCode((RestException) error);
+            return status == 401 || status == 403;
+        }
+        if (error instanceof PulsarAdminException) {
+            int status = ((PulsarAdminException) error).getStatusCode();
+            return status == 401 || status == 403;
+        }
+        return false;
+    }
+
+    private static boolean isFunctionNotFoundError(Throwable error) {
+        if (error instanceof RestException) {
+            return getStatusCode((RestException) error) == 404;
+        }
+        if (error instanceof PulsarAdminException) {
+            return ((PulsarAdminException) error).getStatusCode() == 404;
+        }
+        return false;
+    }
+
+    private static boolean isNetworkError(Throwable error) {
+        if (error instanceof PulsarAdminException.ConnectException
+                || error instanceof PulsarAdminException.TimeoutException) {
+            return true;
+        }
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ConnectException
+                    || current instanceof SocketTimeoutException
+                    || current instanceof UnknownHostException
+                    || current instanceof UnresolvedAddressException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static int getStatusCode(RestException error) {
+        return error.getResponse() != null ? error.getResponse().getStatus() : -1;
     }
 }

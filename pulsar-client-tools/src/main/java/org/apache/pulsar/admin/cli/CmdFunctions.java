@@ -36,6 +36,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -53,6 +54,8 @@ import org.apache.pulsar.common.functions.Resources;
 import org.apache.pulsar.common.functions.UpdateOptionsImpl;
 import org.apache.pulsar.common.functions.Utils;
 import org.apache.pulsar.common.functions.WindowConfig;
+import org.apache.pulsar.common.policies.data.FunctionStatusPage;
+import org.apache.pulsar.common.policies.data.FunctionStatusSummary;
 import org.apache.pulsar.common.util.ObjectMapperFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -700,16 +703,16 @@ public class CmdFunctions extends CmdBase {
                 }
             }
             if (StringUtils.isEmpty(functionConfig.getName())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingFunctionName(functionConfig);
+                Utils.inferMissingFunctionName(functionConfig);
             }
             if (StringUtils.isEmpty(functionConfig.getName())) {
                 throw new IllegalArgumentException("No Function name specified");
             }
             if (StringUtils.isEmpty(functionConfig.getTenant())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingTenant(functionConfig);
+                Utils.inferMissingTenant(functionConfig);
             }
             if (StringUtils.isEmpty(functionConfig.getNamespace())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingNamespace(functionConfig);
+                Utils.inferMissingNamespace(functionConfig);
             }
 
             if (isNotBlank(functionConfig.getJar()) && isNotBlank(functionConfig.getPy())
@@ -1017,16 +1020,16 @@ public class CmdFunctions extends CmdBase {
         @Override
         protected void validateFunctionConfigs(FunctionConfig functionConfig) {
             if (StringUtils.isEmpty(functionConfig.getName())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingFunctionName(functionConfig);
+                Utils.inferMissingFunctionName(functionConfig);
             }
             if (StringUtils.isEmpty(functionConfig.getName())) {
                 throw new ParameterException("Function Name not provided");
             }
             if (StringUtils.isEmpty(functionConfig.getTenant())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingTenant(functionConfig);
+                Utils.inferMissingTenant(functionConfig);
             }
             if (StringUtils.isEmpty(functionConfig.getNamespace())) {
-                org.apache.pulsar.common.functions.Utils.inferMissingNamespace(functionConfig);
+                Utils.inferMissingNamespace(functionConfig);
             }
         }
 
@@ -1050,9 +1053,77 @@ public class CmdFunctions extends CmdBase {
 
     @Command(description = "List all Pulsar Functions running under a specific tenant and namespace")
     class ListFunctions extends NamespaceCommand {
+
+        @Option(names = "--state",
+                description = "Filter by runtime state: RUNNING, STOPPED, PARTIAL, UNKNOWN; cannot be combined"
+                        + " with --limit or --start-after")
+        private FunctionStatusSummary.SummaryState state;
+
+        @Option(names = {"-l", "--long"},
+                description = "Show extended output with state and instance counts")
+        private boolean longFormat;
+
+        @Option(names = "--limit",
+                description = "Limit the number of status summaries returned (only with status-summary path)")
+        private Integer limit;
+
+        @Option(names = "--start-after",
+                description = "Exclusive cursor (function name) for status-summary pagination")
+        private String startAfter;
+
         @Override
         void runCmd() throws Exception {
-            print(getAdmin().functions().getFunctions(tenant, namespace));
+            if (limit != null && limit <= 0) {
+                throw new ParameterException("--limit must be greater than 0");
+            }
+
+            // Prevent ambiguity in semantics
+            if (state != null && (limit != null || startAfter != null)) {
+                throw new ParameterException("--state cannot be combined with --limit or --start-after");
+            }
+
+            if (state == null && !longFormat && limit == null && startAfter == null) {
+                print(getAdmin().functions().getFunctions(tenant, namespace));
+                return;
+            }
+
+            FunctionStatusPage page = limit == null && startAfter == null
+                    ? getAdmin().functions().getFunctionsWithStatus(tenant, namespace)
+                    : getAdmin().functions().getFunctionsWithStatus(tenant, namespace, limit, startAfter);
+
+            List<FunctionStatusSummary> summaries = page.getSummaries();
+
+            if (state != null) {
+                summaries = summaries.stream()
+                        .filter(s -> s.getState() == state)
+                        .collect(Collectors.toList());
+            }
+
+            if (longFormat) {
+                printLongFormat(summaries);
+            } else {
+                for (FunctionStatusSummary s : summaries) {
+                    print(s.getName());
+                }
+            }
+
+            if (page.getNextStartAfter() != null) {
+                print("\nNext page: --start-after " + page.getNextStartAfter());
+            }
+        }
+
+        private void printLongFormat(List<FunctionStatusSummary> summaries) {
+            String header = String.format("%-40s %-10s %s", "NAME", "STATE", "RUNNING/INSTANCES");
+            print(header);
+            for (FunctionStatusSummary s : summaries) {
+                String running = s.getState() == FunctionStatusSummary.SummaryState.UNKNOWN
+                        ? "?" : String.valueOf(s.getNumRunning());
+                String instances = s.getState() == FunctionStatusSummary.SummaryState.UNKNOWN
+                        ? "?" : String.valueOf(s.getNumInstances());
+                String line = String.format("%-40s %-10s %s/%s",
+                        s.getName(), s.getState(), running, instances);
+                print(line);
+            }
         }
     }
 
