@@ -165,7 +165,7 @@ public class FunctionsImplTest {
         when(namespaceTarget.path("status")).thenReturn(statusTarget);
         when(statusTarget.path("summary")).thenReturn(summaryTarget);
         when(summaryTarget.queryParam("limit", 1)).thenReturn(limitTarget);
-        when(limitTarget.queryParam("continuationToken", "fn-a")).thenReturn(continuationTarget);
+        when(limitTarget.queryParam("startAfter", "fn-a")).thenReturn(continuationTarget);
 
         FunctionsImpl functions = org.mockito.Mockito.spy(new FunctionsImpl(root, null, null, 0));
         CompletableFuture<FunctionStatusPage> failed = new CompletableFuture<>();

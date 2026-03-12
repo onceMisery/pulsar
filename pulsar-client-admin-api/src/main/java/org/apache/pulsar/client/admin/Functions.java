@@ -121,7 +121,7 @@ public interface Functions {
     /**
      * Get a paginated batch status summary for functions in a namespace.
      * <p/>
-     * The {@code continuationToken} is an exclusive cursor based on function name
+     * The {@code startAfter} is an exclusive cursor based on function name
      * in lexicographical order.
      *
      * @param tenant
@@ -130,7 +130,7 @@ public interface Functions {
      *            Namespace name
      * @param limit
      *            Maximum number of functions to return; must be greater than 0 when provided
-     * @param continuationToken
+     * @param startAfter
      *            Exclusive continuation token from previous page; null means from beginning
      * @return list of status summaries for the requested page
      * @throws PulsarAdminException
